@@ -1,5 +1,26 @@
 import logging
+from ..utils.utils import LogProgress, bold
+import time
+import os
+
+import cv2
+import numpy as np
+import albumentations as A
+import matplotlib.pyplot as plt
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
+
+from torchvision import datasets
+import torchvision.models as models
+from torchvision.transforms import ToTensor
+
 logger = logging.getLogger(__name__)
+
 class MetricTracker:
     def __init__(self):
         self.tracker = {}
@@ -16,7 +37,7 @@ class MetricTracker:
             self.tracker["val_metrics"].append(metrics)
             self.tracker["val_loss"].append(loss)
         else:
-            print(f"The key: '{key}' is not available. Available: 'train' and 'val'.")
+            logger.error(f"The key: '{key}' is not available. Available: 'train' and 'val'.")
 
 
     def get_result(self):
@@ -75,7 +96,7 @@ class Trainer:
             size += len(target)
             running_loss += loss.item()
             running_metrics += metrics
-            logprog.update(loss=format(running_loss / (i + 1), ".5f"))
+            logprog.update(loss=format(running_loss / (batch_idx + 1), ".5f"))
 
         output = {"loss": running_loss / size,
                   "metrics": running_metrics / size}

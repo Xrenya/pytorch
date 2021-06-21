@@ -1,4 +1,6 @@
 import time
+import logging
+
 class LogProgress:
     """
     Sort of like tqdm but using log lines and not as real time.
