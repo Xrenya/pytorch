@@ -2,7 +2,7 @@ import logging
 from ..utils.utils import LogProgress, bold
 import time
 import os
-
+import json
 import cv2
 import numpy as np
 import albumentations as A
@@ -44,7 +44,7 @@ class MetricTracker:
         return self.tracker
 
 
-class Trainer:
+class Trainer(object):
     def __init__(self,
                  model,
                  criterion,
@@ -53,6 +53,7 @@ class Trainer:
                  device,
                  data_loader,
                  valid_data_loader,
+                 args, 
                  metric_tracker=None,
                  lr_scheduler=None,
                  gradient_clippers=None):
@@ -68,6 +69,10 @@ class Trainer:
         self.model.to(self.device)
         self.metric_tracker = MetricTracker()
         self.num_prints = 1
+        self.history_file = args.history_file
+        self.history = []
+        self.epochs = args.epochs
+        self.args = args
         
     def _train_one_epoch(self, epoch):
         self.model.train()
@@ -96,6 +101,7 @@ class Trainer:
             size += len(target)
             running_loss += loss.item()
             running_metrics += metrics
+            
             logprog.update(loss=format(running_loss / (batch_idx + 1), ".5f"))
 
         output = {"loss": running_loss / size,
@@ -108,8 +114,15 @@ class Trainer:
         running_loss = 0
         running_metrics = 0
         size = 0
+        
+        name = f"Valid | Epoch {epoch + 1}"
+        logprog = LogProgress(logger, 
+                              self.valid_data_loader,
+                              updates=self.num_prints,
+                              name=name)
+        
         with torch.no_grad():
-            for batch_idx, (input, target) in enumerate(self.valid_data_loader):
+            for batch_idx, (input, target) in enumerate(logprog):
                 input, target = input.to(self.device), target.to(self.device)
                 
                 output = self.model.forward(input)
@@ -119,28 +132,57 @@ class Trainer:
                 size += len(target)
                 running_loss += loss.item()
                 running_metrics += metrics
+                
+                logprog.update(loss=format(running_loss / (batch_idx + 1), ".5f"))
 
         output = {"loss": running_loss / size,
                   "metrics": running_metrics / size}
         del size, running_loss, running_metrics
         return output
 
-    def train(self, epochs):
-        for epoch in range(epochs):
-            start = time.time()
+    def train(self):
+        for epoch in range(len(self.history), self.epochs):
+            if self.history:
+                logger.info("Replaying metrics from previous run")
+            for epoch, metrics in enumerate(self.history):
+                info = " ".join(f"{k}={v:.5f}" for k, v in metrics.items())
+                logger.info(f"Epoch {epoch}: {info}")
+                
             logger.info('-' * 70)
             logger.info("Training...")
+            
+            start = time.time()
             train_output = self._train_one_epoch(epoch)
             self.metric_tracker.update("train",
                                        train_output["metrics"],
                                        train_output["loss"])
             logger.info(bold(f'Train Summary | End of Epoch {epoch + 1} | '
                              f'Time {time.time() - start:.2f}s | Train Loss {train_output["loss"]:.5f}'))
-
+            
+            logger.info('-' * 70)
             valid_output = self._eval_one_epoch(epoch)
             self.metric_tracker.update("val",
-                                       valid_output["metrics"],
-                                       valid_output["loss"])
+                        valid_output["metrics"],
+                        valid_output["loss"])
+            logger.info(bold(f'Valid Summary | End of Epoch {epoch + 1} | '
+                             f'Time {time.time() - start:.2f}s | Train Loss {valid_output["loss"]:.5f}'))
+            
+            metrics = {"metrics": valid_output["metrics"],
+                       "loss": valid_output["loss"]}
+            self.history.append(metrics)
+            
+            info = " | ".join(
+                f"{k.capitalize()} {v:.5f}" for k, v in metrics.items())
+            logger.info('-' * 70)
+            logger.info(bold(f"Overall Summary | Epoch {epoch + 1} | {info}"))
+            
+            json.dump(self.history, open(self.history_file, "w"), indent=2)
+                # Save model each epoch
+            if self.checkpoint:
+                self._serialize(self.checkpoint)
+                logger.debug("Checkpoint saved to %s",
+                            self.checkpoint.resolve())
+        
         return self.metric_tracker.get_result()
 
     def _save_checkpoint(self, epoch, filepath, save_best=False):
@@ -149,13 +191,7 @@ class Trainer:
             'arch': arch,
             'epoch': epoch,
             'state_dict': self.model.state_dict(),
-            'optimizer': self.optimizer.state_dict(),
-            'monitor_best': self.mnt_best,
-            'config': self.config
-        }
-        filename = str(self.checkpoint_dir / 'checkpoint-epoch{}.pth'.format(epoch))
-        torch.save(state, filename)
-        self.logger.info("Saving checkpoint: {} ...".format(filename))
+            'optimizer': self.optimizer.state_dict()}
         if save_best:
             best_path = str(self.checkpoint_dir / 'model_best.pth')
             torch.save(state, best_path)

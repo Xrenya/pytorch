@@ -2,12 +2,6 @@ defaults:
   - override hydra/job_logging: colorlog
   - override hydra/hydra_logging: colorlog
   
-# Hydra config
-hydra:
-  run:
-    dir: ./outputs/exp_${hydra.job.override_dirname}
-
-
 # Automatically load from the last checkpoint
 checkpoint: True
 restart: False # Ignore existing checkopoints
@@ -32,3 +26,42 @@ step:
 plateau:
   factor: 0.5
   patience: 5
+
+# Device
+device_gpu: True
+
+  # Hydra config
+hydra:
+  run:
+    dir: ./outputs/exp_${hydra.job.override_dirname}
+  job:
+    config:
+      # configuration for the ${hydra.job.override_dirname} runtime variable
+      override_dirname:
+        kv_sep: '='
+        item_sep: ','
+        # Remove all paths, as the / in them would mess up things
+        # Remove params that would not impact the training itself
+        # Remove all slurm and submit params.
+        # This is ugly I know...
+        exclude_keys: [
+          'num_prints', 'continue_from',
+          'device', 'num_workers']
+  job_logging:
+    handlers:
+      file:
+        class: logging.FileHandler
+        mode: w
+        formatter: colorlog
+        filename: trainer.log
+      console:
+        class: logging.StreamHandler
+        formatter: colorlog
+        stream: ext://sys.stderr
+
+  hydra_logging:
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: colorlog
+        stream: ext://sys.stderr
