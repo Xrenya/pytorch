@@ -1,0 +1,18 @@
+checkpoint: true
+restart: false
+checkpoint_file: checkpoint.th
+history_file: history.json
+seed: 2077
+verbose: 0
+optim: adam
+lr: 0.0005
+beta2: 0.999
+epochs: 1
+batch_size: 128
+lr_sched: step
+step:
+  step_size: 2
+  gamma: 0.98
+plateau:
+  factor: 0.5
+  patience: 5

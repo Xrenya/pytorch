@@ -114,17 +114,28 @@ def run(args):
         return correct
 
     torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     trainer = Trainer(model, loss_fn, optimizer, metrics, device, train_dataloader, test_dataloader)
 
     output = trainer.train(args.epochs)
     print(output)
 
+def _main(args):
+    global __file__
+    __file__ = hydra.utils.to_absolute_path(__file__)
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+        logging.getLogger("denoise").setLevel(logging.DEBUG)
+
+    logger.info("For logs, checkpoints and samples check %s", os.getcwd())
+    logger.debug(args)
+    run(args)
+            
+
 @hydra.main(config_path="conf", config_name='config.yaml')
 def main(args):
     try:
-        ran(args)
+        _main(args)
     except Exception:
         logger.exception("Some error happened")
         # Hydra intercepts exit code, fixed in beta but I could not get the beta to work

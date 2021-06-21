@@ -1,7 +1,12 @@
 defaults:
-  - dset: debug
-  - hydra/job_logging: colorlog
-  - hydra/hydra_logging: colorlog
+  - override hydra/job_logging: colorlog
+  - override hydra/hydra_logging: colorlog
+  
+# Hydra config
+hydra:
+  run:
+    dir: ./outputs/exp_${hydra.job.override_dirname}
+
 
 # Automatically load from the last checkpoint
 checkpoint: True
@@ -10,14 +15,14 @@ checkpoint_file: checkpoint.th
 history_file: history.json
 
 seed: 2077
-
+verbose: 0
 # Optimization 
 optim: adam
 lr: 5e-4
 beta2: 0.999
 
-epochs: 4
-batch_size: 64
+epochs: 1
+batch_size: 128
 
 # learning rate scheduling
 lr_sched: step # can be either step or plateau
@@ -27,4 +32,3 @@ step:
 plateau:
   factor: 0.5
   patience: 5
-
