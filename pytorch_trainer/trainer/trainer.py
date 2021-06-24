@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import albumentations as A
 import matplotlib.pyplot as plt
-
+from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -73,6 +73,14 @@ class Trainer(object):
         self.history = []
         self.epochs = args.epochs
         self.args = args
+        self.continue_from = args.continue_from
+        self.checkpoint = Path(
+            args.checkpoint_file) if args.checkpoint else None
+        if self.checkpoint:
+            logger.debug("Checkpoint will be saved to %s",
+                         self.checkpoint.resolve())
+            
+        self._reset()
         
     def _train_one_epoch(self, epoch):
         self.model.train()
@@ -167,8 +175,11 @@ class Trainer(object):
             logger.info(bold(f'Valid Summary | End of Epoch {epoch + 1} | '
                              f'Time {time.time() - start:.2f}s | Train Loss {valid_output["loss"]:.5f}'))
             
-            metrics = {"metrics": valid_output["metrics"],
-                       "loss": valid_output["loss"]}
+            metrics = {"train_metrics": valid_output["metrics"],
+                       "val_metrics": train_output["metrics"],
+                       "train_loss": valid_output["loss"],
+                       "val_loss": train_output["loss"]}
+            
             self.history.append(metrics)
             
             info = " | ".join(
@@ -185,24 +196,12 @@ class Trainer(object):
         
         return self.metric_tracker.get_result()
 
-    def _save_checkpoint(self, epoch, filepath, save_best=False):
-        arch = type(self.model).__name__
-        state = {
-            'arch': arch,
-            'epoch': epoch,
-            'state_dict': self.model.state_dict(),
-            'optimizer': self.optimizer.state_dict()}
-        if save_best:
-            best_path = str(self.checkpoint_dir / 'model_best.pth')
-            torch.save(state, best_path)
-            self.logger.info("Saving current best: model_best.pth ...")
-
     def _serialize(self, path):
         package = {}
-        package['model'] = serialize_model(self.model)
+        package['model'] = self.model.state_dict()
         package['optimizer'] = self.optimizer.state_dict()
         package['history'] = self.history
-        package['best_state'] = self.best_state
+        #package['best_state'] = self.best_state
         package['args'] = self.args
         torch.save(package, path)
             
@@ -211,19 +210,49 @@ class Trainer(object):
         self.logger.info("Loading checkpoint: {} ...".format(resume_path))
         checkpoint = torch.load(resume_path)
         self.start_epoch = checkpoint['epoch'] + 1
-        self.mnt_best = checkpoint['monitor_best']
+        #self.mnt_best = checkpoint['monitor_best']
 
-        # load architecture params from checkpoint.
-        if checkpoint['config']['arch'] != self.config['arch']:
-            self.logger.warning("Warning: Architecture configuration given in config file is different from that of "
-                                "checkpoint. This may yield an exception while state_dict is being loaded.")
-        self.model.load_state_dict(checkpoint['state_dict'])
-
-        # load optimizer state from checkpoint only when optimizer type is not changed.
-        if checkpoint['config']['optimizer']['type'] != self.config['optimizer']['type']:
-            self.logger.warning("Warning: Optimizer type given in config file is different from that of checkpoint. "
-                                "Optimizer parameters not being resumed.")
-        else:
-            self.optimizer.load_state_dict(checkpoint['optimizer'])
+        self.optimizer.load_state_dict(checkpoint['optimizer'])
 
         self.logger.info("Checkpoint loaded. Resume training from epoch {}".format(self.start_epoch))
+        
+    def _reset(self):
+        load_from = None
+        # Reset
+        if self.checkpoint and self.checkpoint.exists(): #and not self.restart:
+            load_from = self.checkpoint
+        elif self.continue_from:
+            load_from = self.continue_from
+
+        if load_from:
+            logger.info(f'Loading checkpoint model: {load_from}')
+            package = torch.load(load_from, 'cpu')
+            #if load_from == self.continue_from:# and self.args.continue_best:
+             #elf.model.load_state_dict(package['best_state'])
+            #else:
+            self.model.load_state_dict(package['model'])
+            if 'optimizer' in package: #and not self.args.continue_best:
+                self.optimizer.load_state_dict(package['optimizer'])
+            self.history = package['history']
+            print(self.history)
+            #self.best_state = package['best_state']
+
+
+
+def deserialize_model(package, strict=False):
+    klass = package['class']
+    if strict:
+        model = klass(*package['args'], **package['kwargs'])
+    else:
+        sig = inspect.signature(klass)
+        kw = package['kwargs']
+        for key in list(kw):
+            if key not in sig.parameters:
+                logger.warning("Dropping inexistant parameter %s", key)
+                del kw[key]
+        model = klass(*package['args'], **kw)
+    model.load_state_dict(package['state'])
+    return model
+
+def copy_state(state):
+    return {k: v.cpu().clone() for k, v in state.items()}
