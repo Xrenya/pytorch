@@ -68,7 +68,8 @@ class Trainer(object):
         self.lr_scheduler = lr_scheduler
         self.model.to(self.device)
         self.metric_tracker = MetricTracker()
-        self.num_prints = 1
+        self.num_prints = args.num_prints
+        self.best_state = 0
         self.history_file = args.history_file
         self.history = []
         self.epochs = args.epochs
@@ -175,20 +176,28 @@ class Trainer(object):
             logger.info(bold(f'Valid Summary | End of Epoch {epoch + 1} | '
                              f'Time {time.time() - start:.2f}s | Train Loss {valid_output["loss"]:.5f}'))
             
-            metrics = {"train_metrics": valid_output["metrics"],
-                       "val_metrics": train_output["metrics"],
-                       "train_loss": valid_output["loss"],
-                       "val_loss": train_output["loss"]}
+            metrics = {"train_metrics": train_output["metrics"],
+                       "val_metrics": valid_output["metrics"],
+                       "train_loss": train_output["loss"],
+                       "val_loss": valid_output["loss"]}
             
             self.history.append(metrics)
             
             info = " | ".join(
                 f"{k.capitalize()} {v:.5f}" for k, v in metrics.items())
             logger.info('-' * 70)
-            logger.info(bold(f"Overall Summary | Epoch {epoch + 1} | {info}"))
+            logger.info(bold(f"Overall Smmary | Epoch {epoch + 1} | {info}"))
             
             json.dump(self.history, open(self.history_file, "w"), indent=2)
-                # Save model each epoch
+            
+            
+            if self.best_state < metrics["val_metrics"]:
+                self.best_state = metrics["val_metrics"]
+                self._serialize(self.checkpoint)
+                logger.debug("Best checkpoint saved to %s",
+                            self.checkpoint.resolve())
+                
+            # Save model each epoch
             if self.checkpoint:
                 self._serialize(self.checkpoint)
                 logger.debug("Checkpoint saved to %s",
@@ -201,7 +210,7 @@ class Trainer(object):
         package['model'] = self.model.state_dict()
         package['optimizer'] = self.optimizer.state_dict()
         package['history'] = self.history
-        #package['best_state'] = self.best_state
+        package['best_state'] = self.best_state
         package['args'] = self.args
         torch.save(package, path)
             
